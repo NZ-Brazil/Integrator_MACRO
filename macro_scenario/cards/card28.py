@@ -20,9 +20,10 @@ or removed from the working CSV altogether.
     c         removed      retained            constraint TRUE and max_capacity 5000
     d         removed      removed             unchanged on the existing plants
 
-In option c, both MaxCapacityConstraint and max_capacity apply to every retained
-gas row, including existing plants. If either column is absent, this card adds
-it to the working CSV.
+In option c, MaxCapacityConstraint and max_capacity apply only to new (retained
+candidate) gas rows. Existing plants never have either value written to them
+and keep whatever was already in the working CSV. If either column is absent,
+this card adds it to the working CSV.
 
 natural_gas_power_ccs has no _Existing row at all, which is correct: there is no
 gas plant with CCS in Brazil today. Every row there takes the candidate branch.
@@ -61,13 +62,14 @@ def is_existing(asset_id):
 
 def rule_for(allow_candidates, max_constraint=None, max_capacity=None):
     def rule(asset_id, period):
-        existing = is_existing(asset_id)
-        if existing:
-            values = {CAN_EXPAND: FALSE, HAS_CAPACITY: TRUE}
-        elif not allow_candidates:
+        if is_existing(asset_id):
+            # Existing plants keep can_expand FALSE / has_capacity TRUE only.
+            # MaxCapacityConstraint and max_capacity are never written here,
+            # regardless of option, so their pre-existing values are untouched.
+            return {CAN_EXPAND: FALSE, HAS_CAPACITY: TRUE}
+        if not allow_candidates:
             return DROP
-        else:
-            values = {CAN_EXPAND: TRUE, HAS_CAPACITY: TRUE}
+        values = {CAN_EXPAND: TRUE, HAS_CAPACITY: TRUE}
         if max_constraint is not None:
             values[MAX_CAPACITY_CONSTRAINT] = max_constraint
         if max_capacity is not None:
