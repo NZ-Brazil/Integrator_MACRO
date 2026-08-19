@@ -1,6 +1,6 @@
 # macro_scenario
 
-Applies the scenario choices the user made on the NetZero Brasil platform to the
+Applies the scenario choices the user made on the NetZero Brazil platform to the
 Macro case. The Worker fetches the configuration from the database, builds the
 `scenario_config.csv` (Padroes.md, section 7), and calls a single function:
 
