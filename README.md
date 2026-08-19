@@ -1,153 +1,154 @@
 # macro_scenario
 
-Aplica ao case do Macro as escolhas de cenário feitas pelo usuário na plataforma
-NetZero Brasil. O Worker busca a configuração no banco, monta o
-`scenario_config.csv` (Padroes.md, seção 7) e chama uma única função:
+Applies the scenario choices the user made on the NetZero Brasil platform to the
+Macro case. The Worker fetches the configuration from the database, builds the
+`scenario_config.csv` (Padroes.md, section 7), and calls a single function:
 
 ```python
 from macro_scenario import apply_scenario_config
 
 report = apply_scenario_config(
-    job_id="3f2b...",                    # uuid do job
+    job_id="3f2b...",                    # job uuid
     scenario_config="scenario_config.csv",
-    case_dir="/data/case",               # case já extraído, alterado in-place
-    ep2macro_dir="/data/MACRO input",    # opcional
-    run_tdr=True,                        # opcional
+    case_dir="/data/case",               # already-extracted case, modified in-place
+    ep2macro_dir="/data/MACRO input",    # optional
+    run_tdr=True,                        # optional
 )
 ```
 
-O retorno é o AdjustmentReport da seção 5 do Padroes.md, que o Worker publica em
-`POST /internal/jobs/{id}/adjustments`.
+The return value is the AdjustmentReport from section 5 of Padroes.md, which the
+Worker publishes to `POST /internal/jobs/{id}/adjustments`.
 
-## Rodando (VS Code ou terminal)
+## Running (VS Code or terminal)
 
-Só precisa de Python 3.8+; o pacote usa apenas a biblioteca padrão, sem instalar
-nada. Abra no VS Code a pasta que contém `macro_scenario/` e rode do terminal
-integrado — ou pressione F5, que o `.vscode/launch.json` já traz três
-configurações prontas. `run_example.py` é o atalho: ajuste as quatro variáveis do
-topo e execute.
+Only needs Python 3.8+; the package uses only the standard library, nothing to
+install. Open the folder containing `macro_scenario/` in VS Code and run it from
+the integrated terminal — or press F5, since `.vscode/launch.json` already
+ships three ready-made configurations. `run_example.py` is the shortcut: adjust
+the four variables at the top and run it.
 
-Pela linha de comando:
+From the command line:
 
 ```
 python -m macro_scenario CASE -c scenario_config.csv --report
-python -m macro_scenario CASE -c scenario_config.csv --check      # nada é escrito
-python -m macro_scenario CASE --set 25=b --set 24=c               # testar um card
+python -m macro_scenario CASE -c scenario_config.csv --check      # nothing is written
+python -m macro_scenario CASE --set 25=b --set 24=c               # test a single card
 python -m macro_scenario CASE -c config.csv --ep2macro "MACRO input" --tdr
 python tests.py
 ```
 
-Como os cards 27, 28, 29 e 31 podem remover linhas, cada cenário deve começar
-com uma cópia nova de `NZB_Default_Scenario`; não reutilize uma pasta que já
-recebeu outra combinação de opções.
+Since cards 27, 28, 29 and 31 can remove rows, each scenario must start from a
+fresh copy of `NZB_Default_Scenario`; don't reuse a folder that has already
+received a different combination of options.
 
-## Ordem de operação
+## Order of operations
 
-| etapa | o que roda | onde escreve |
+| step | what runs | where it writes |
 |---|---|---|
-| 1 | card 25 — inovação tecnológica | `assets/**/*.csv` (custos) |
-| 2.1 | importação EP2MACRO | `system/` (demanda) e `co2_source` nos nós |
-| 2.2 | cards 2, 33 e 24 | `system/nodes_*.json` e `system/fuel_prices_*.csv` |
+| 1 | card 25 — technological innovation | `assets/**/*.csv` (costs) |
+| 2.1 | EP2MACRO import | `system/` (demand) and `co2_source` on the nodes |
+| 2.2 | cards 2, 33 and 24 | `system/nodes_*.json` and `system/fuel_prices_*.csv` |
 | 3 | cards 27, 28, 29, 30, 31, 32 | `assets/**/*.csv` |
-| 4 | TDR | reduz tudo que está em `system/` |
+| 4 | TDR | reduces everything under `system/` |
 
-O card 25 vem primeiro porque reescreve os 192 arquivos de assets; qualquer card
-que edite os mesmos arquivos precisa vir depois. O TDR vem por último para que
-demanda, disponibilidade e preços caiam todos no mesmo Period_map.
+Card 25 runs first because it rewrites the 192 asset files; any card that edits
+the same files needs to come after it. TDR runs last so that demand,
+availability and prices all fall onto the same Period_map.
 
-## Cards implementados
+## Implemented cards
 
-| id | variável | fonte dos valores | estado |
+| id | variable | source of values | status |
 |---|---|---|---|
-| 2 | Net emissions caps | `Emissions_cap_trajectory.csv` (MtCO2e × 1e6) | completo |
-| 24 | Fossil fuel wholesale prices | `data/card24_prices.py` | completo (A, B, C) |
-| 25 | Energy supply technology innovation | colunas `_25-X` em `assets_full/` | banco só tem B |
-| 27 | Hydroelectric power plants | `cards/card27.py` (regra, sem números) | completo |
-| 28 | Fossil thermal power plants | `cards/card28.py` (regras + exclusão de candidatas) | completo; 28-C usa `max_capacity = 5000` |
-| 29 | Nuclear power plants | `cards/card29.py` (regras + lifetimes + exclusão de candidatas) | flag do limite implementada; valor numérico pendente |
-| 30 | Solar and wind power | `data/card30_capacity.py` | só a opção B |
-| 31 | Rooftop solar deployment | `cards/card31.py` (regra) | completo |
-| 32 | Oil production | `data/card32_emissions.py` | completo |
-| 33 | Underground CO2 storage | `data/card33_storage.py` | C e Ceará pendentes |
+| 2 | Net emissions caps | `Emissions_cap_trajectory.csv` (MtCO2e × 1e6) | complete |
+| 24 | Fossil fuel wholesale prices | `data/card24_prices.py` | complete (A, B, C) |
+| 25 | Energy supply technology innovation | `_25-X` columns in `assets_full/` | database only has B |
+| 27 | Hydroelectric power plants | `cards/card27.py` (rule, no numbers) | complete |
+| 28 | Fossil thermal power plants | `cards/card28.py` (rules + candidate exclusion) | complete; 28-C uses `max_capacity = 5000` |
+| 29 | Nuclear power plants | `cards/card29.py` (rules + lifetimes + candidate exclusion) | limit flag implemented; numeric value pending |
+| 30 | Solar and wind power | `data/card30_capacity.py` | only option B |
+| 31 | Rooftop solar deployment | `cards/card31.py` (rule) | complete |
+| 32 | Oil production | `data/card32_emissions.py` | complete |
+| 33 | Underground CO2 storage | `data/card33_storage.py` | C and Ceará pending |
 
-Os 10 cards do Macro estão implementados. Pendências de dado, não de código:
-as opções A e C do card 25 e a opção A do card 30 estão vazias no banco; a opção
-C do card 33 e a bacia do Ceará são placeholders. Os cards 28-C e 29-C criam e
-ativam `MaxCapacityConstraint`. O card 28-C escreve `max_capacity = 5000` em
-todas as usinas a gás mantidas, novas e existentes. O limite numérico do card 29
-ainda precisa ser fornecido.
+All 10 Macro cards are implemented. What remains is missing data, not missing
+code: options A and C of card 25 and option A of card 30 are empty in the
+database; option C of card 33 and the Ceará basin are placeholders. Cards 28-C
+and 29-C create and activate `MaxCapacityConstraint`. Card 28-C writes
+`max_capacity = 5000` on every gas plant kept, whether new or existing. The
+numeric limit for card 29 still needs to be supplied.
 
-Nos cards 28, 29 e 31, `has_capacity` permanece `TRUE` em todas as linhas que
-ficam no cenário. Tecnologias indisponíveis são removidas do CSV de trabalho:
-28-B/C removem carvão novo; 28-D também remove gás novo; 29-A/B removem nuclear
-nova; e o card 31 mantém somente o bloco de IDs correspondente à opção A, B ou C.
-No card 31, a linha mantida recebe `MinCapacityConstraint = FALSE` na opção A e
-`TRUE` nas opções B e C. O valor de `min_capacity` não é reescrito: permanece o
-valor já cadastrado na própria linha selecionada.
+In cards 28, 29 and 31, `has_capacity` stays `TRUE` on every row that remains
+in the scenario. Unavailable technologies are removed from the working CSV:
+28-B/C remove new coal; 28-D also removes new gas; 29-A/B remove new nuclear;
+and card 31 keeps only the block of IDs corresponding to option A, B or C. In
+card 31, the row that's kept gets `MinCapacityConstraint = FALSE` under option
+A and `TRUE` under options B and C. The `min_capacity` value itself is not
+rewritten: it stays whatever was already registered on the selected row.
 
-Quando uma linha necessária não estiver em `assets/`, o card 27 a recupera do
-`assets_full/`. Na nova estrutura, os campos-base — inclusive `max_capacity` —
-são copiados diretamente. O suporte às antigas colunas de custo
-`_25-<opção escolhida>` permanece apenas para compatibilidade.
+When a required row is missing from `assets/`, card 27 retrieves it from
+`assets_full/`. With the new structure, the base fields — including
+`max_capacity` — are copied directly. Support for the old `_25-<chosen option>`
+cost columns remains only for backward compatibility.
 
-Com a nova estrutura dos arquivos hidrelétricos, o card 27 apenas seleciona
-linhas: A mantém novas e existentes nos dois arquivos; B remove somente as
-novas de `hydro_res.csv`; C remove as novas de `hydro_res.csv` e
-`hydro_ror.csv`. Os valores de `max_capacity`, flags e custos das linhas
-mantidas não são alterados.
+With the new structure of the hydroelectric files, card 27 only selects rows:
+A keeps both new and existing plants in both files; B removes only the new
+ones from `hydro_res.csv`; C removes the new ones from both `hydro_res.csv`
+and `hydro_ror.csv`. The `max_capacity` values, flags and costs of the rows
+that are kept are left unchanged.
 
-## Estrutura
+## Structure
 
 ```
 macro_scenario/
-  apply.py              orquestra as etapas e monta o relatório
-  scenario_config.py    lê o scenario_config.csv da plataforma
-  csvio.py              csv: detecta delimitador, preserva a quebra de linha
-  jsonio.py             edita os nodes_*.json sem reformatar o arquivo
+  apply.py              orchestrates the steps and builds the report
+  scenario_config.py    reads the platform's scenario_config.csv
+  csvio.py              csv: detects the delimiter, preserves the line ending
+  jsonio.py             edits the nodes_*.json files without reformatting them
   report.py             AdjustmentReport
   cards/
-    __init__.py         HANDLERS, STAGE_OF, ORDER  <- registre um card novo aqui
-    base.py             o contexto que todo card recebe
-    suffix.py           motor das colunas com sufixo (_25-B)
-    flags.py            motor dos cards que ligam/desligam colunas por id
-    nodes.py            helper dos nodes_<período>.json
+    __init__.py         HANDLERS, STAGE_OF, ORDER  <- register a new card here
+    base.py             the context every card receives
+    suffix.py           engine for suffixed columns (_25-B)
+    flags.py             engine for cards that toggle columns on/off by id
+    nodes.py             helper for nodes_<period>.json
     card2.py card24.py card25.py card27.py card28.py
     card29.py card30.py card31.py card32.py card33.py
-  data/                 valores de cenário, embutidos no código
+  data/                 scenario values, embedded in the code
   steps/
-    ep2macro.py         demanda + CO2_Emissions
-    tdr.py              chama o run_tdr.jl
-tests.py                testes automatizados sobre um case sintético
+    ep2macro.py         demand + CO2_Emissions
+    tdr.py               calls run_tdr.jl
+tests.py                automated tests against a synthetic case
 ```
 
-## Como adicionar um card
+## How to add a card
 
-1. `cards/card<NN>.py` com uma função `apply(ctx)`.
-2. Registre em `cards/__init__.py`: `HANDLERS`, `STAGE_OF` e, se a ordem
-   importar, `ORDER`.
-3. Os valores vão em `data/card<NN>_*.py`, nunca lidos de planilha em runtime.
-4. Um teste em `tests.py`.
+1. `cards/card<NN>.py` with an `apply(ctx)` function.
+2. Register it in `cards/__init__.py`: `HANDLERS`, `STAGE_OF` and, if order
+   matters, `ORDER`.
+3. Values go in `data/card<NN>_*.py`, never read from a spreadsheet at runtime.
+4. A test in `tests.py`.
 
-Regras que todo card segue (Padroes.md, seção 3): altera o case in-place, é
-idempotente, nunca derruba o job por dado ausente, e **nunca escreve vazio por
-cima de um valor bom** — valor ausente vira aviso e o case mantém o que tinha.
+Rules every card follows (Padroes.md, section 3): it modifies the case
+in-place, is idempotent, never fails the job over missing data, and **never
+writes an empty value over a good one** — a missing value becomes a warning
+and the case keeps what it already had.
 
-As gravações são encenadas: `ctx.save()` guarda o arquivo editado em memória e o
-orquestrador descarrega tudo quando o handler retorna sem erro. Um card grava
-todos os seus arquivos ou nenhum — não existe cenário meio aplicado. Cada arquivo
-é escrito num temporário ao lado e movido para o lugar, então uma interrupção não
-deixa arquivo truncado.
+Writes are staged: `ctx.save()` keeps the edited file in memory, and the
+orchestrator flushes everything once the handler returns without error. A
+card writes all of its files or none — there is no such thing as a
+half-applied scenario. Each file is written to a temp file alongside it and
+then moved into place, so an interruption never leaves a truncated file.
 
-## Estados no relatório
+## Report statuses
 
-| status | significado |
+| status | meaning |
 |---|---|
-| `applied` | valor gravado |
-| `unchanged` | o case já estava assim |
-| `not_in_database` | opção sem valor definido — o case manteve o dele (aviso) |
-| `key_missing` | arquivo ou coluna que o card esperava não existe (aviso) |
-| `not_implemented` | variável sem opção marcada no formulário |
+| `applied` | value written |
+| `unchanged` | the case was already like this |
+| `not_in_database` | option has no defined value — the case kept its own (warning) |
+| `key_missing` | a file or column the card expected doesn't exist (warning) |
+| `not_implemented` | variable with no option selected on the form |
 
-Além de `adjustments` (uma entrada por variável do formulário), o relatório traz
-`steps`, com o que foi feito fora do formulário — a importação do EP2MACRO e o
-TDR.
+Besides `adjustments` (one entry per form variable), the report includes
+`steps`, covering what was done outside the form — the EP2MACRO import and
+the TDR.
