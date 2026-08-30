@@ -7,6 +7,16 @@ Two things come from the converter, and neither is a form variable:
 
   CO2_Emissions.csv             ->  system/nodes_<period>.json
       Year,CO2_Total                   CO2 -> co2_source -> max_supply
+                                 ->  assets/assets_<period>/co2_transmission.csv
+                                     CO2 -> Industry_to_Sink ->
+                                     edges--transmission_edge--existing_capacity
+
+The industry emissions total is written twice, once per period: into
+co2_source.max_supply of system/nodes_<period>.json, as before, and now also
+into the existing_capacity of the Industry_to_Sink row of
+assets/assets_<period>/co2_transmission.csv - the transmission edge that
+carries the same CO2 out of co2_source. Both writes come from the same
+CO2_Emissions.csv reading, so the two stay in sync.
 
 The demand files arrive with 8760 rows. That is on purpose: the TDR runs at the
 end of the pipeline and reduces everything in system/ together, so all series
@@ -16,9 +26,11 @@ Nothing here is invented: a period the converter did not produce is reported and
 the case keeps what it had.
 """
 
+import re
 import shutil
+from pathlib import Path
 
-from ..csvio import DataError, read_table
+from ..csvio import DataError, ID_COLUMN, read_table, write_table
 from ..jsonio import NodeFile
 from ..cards.nodes import node_paths
 
@@ -29,6 +41,12 @@ NODE_ID = "co2_source"
 SUPPLY_KEY = "max_supply"
 YEAR_COLUMNS = ("Year", "year", "Time_Index", "Period")
 TOTAL_COLUMNS = ("CO2_Total", "CO2_total", "Total")
+
+ASSETS_DIR = "assets"
+TRANSMISSION_FILENAME = "co2_transmission.csv"
+TRANSMISSION_ID = "Industry_to_Sink"
+CAPACITY_COLUMN = "edges--transmission_edge--existing_capacity"
+PERIOD_IN_ASSET_DIR = re.compile(r"_(\d{4})$")
 
 
 def copy_demand_files(case_dir, source_dir, dry_run=False):
@@ -91,5 +109,54 @@ def write_emissions(case_dir, emissions, dry_run=False, warn=None):
         nodes = NodeFile(path)
         before, after = nodes.set_list(NODE_ID, SUPPLY_KEY, value)
         if nodes.save(dry_run):
+            changes.append({"file": path.name, "period": period, "from": before, "to": after})
+    return changes
+
+
+def transmission_paths(case_dir):
+    """[(2025, Path), ...] for every assets_<period>/co2_transmission.csv in the case."""
+    root = Path(case_dir) / ASSETS_DIR
+    if not root.is_dir():
+        raise DataError(f"{ASSETS_DIR}/ not found in the case")
+
+    found = []
+    for folder in sorted(p for p in root.iterdir() if p.is_dir()):
+        match = PERIOD_IN_ASSET_DIR.search(folder.name)
+        if not match:
+            continue
+        path = folder / TRANSMISSION_FILENAME
+        if path.is_file():
+            found.append((int(match.group(1)), path))
+    return found
+
+
+def write_transmission_capacity(case_dir, emissions, dry_run=False, warn=None):
+    """Write CO2_Total into the existing_capacity of the Industry_to_Sink row of
+    every period's assets/assets_<period>/co2_transmission.csv."""
+    changes = []
+    for period, path in transmission_paths(case_dir):
+        value = emissions.get(period)
+        if value is None:
+            if warn:
+                warn(f"period {period} is missing from {EMISSIONS_FILENAME}; {path.name} unchanged")
+            continue
+
+        table = read_table(path, key=ID_COLUMN)
+        row = table.index.get(TRANSMISSION_ID)
+        if row is None:
+            if warn:
+                warn(f"{path.name}: no row '{TRANSMISSION_ID}' in {TRANSMISSION_FILENAME}")
+            continue
+        if CAPACITY_COLUMN not in table.fieldnames:
+            if warn:
+                warn(f"{path.name}: no column '{CAPACITY_COLUMN}'")
+            continue
+
+        before = row[CAPACITY_COLUMN]
+        after = str(value)
+        if before != after:
+            row[CAPACITY_COLUMN] = after
+            if not dry_run:
+                write_table(table)
             changes.append({"file": path.name, "period": period, "from": before, "to": after})
     return changes

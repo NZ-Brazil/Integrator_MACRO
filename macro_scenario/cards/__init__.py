@@ -7,14 +7,17 @@ ignored without a warning.
 The stages follow the agreed order of operations:
 
     1  assets_cost   card 25, which rewrites the cost columns of every asset
-    2  (EP2MACRO import: demand files into system/, CO2_Emissions into the nodes)
+    2  (EP2MACRO import: demand files into system/, CO2_Emissions into the nodes
+       and into Industry_to_Sink existing_capacity of every co2_transmission.csv)
     2  system        cards that edit system/: the nodes (2, 33) and fuel prices (24)
     3  assets        the remaining asset cards (27, 28, 29, 30, 31, 32)
     4  (TDR: reduces every series in system/ onto one period map)
 
 Card 25 comes first because it rewrites 192 asset files; anything editing those
 same files has to come after it. The EP2MACRO import comes before the system
-cards because card 2 and the CO2 emissions both write into the node files.
+cards because card 2 and the CO2 emissions both write into the node files. No
+asset card touches co2_transmission.csv, so the EP2MACRO import is free to
+write its existing_capacity even though it runs before the asset-card stage.
 
 Card 30 is a special case: it is in HANDLERS because it writes to the case, but
 the option it acts on is not its own - it reads card 6 through ctx.chosen(6)
