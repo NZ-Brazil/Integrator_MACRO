@@ -46,7 +46,7 @@ received a different combination of options.
 | step | what runs | where it writes |
 |---|---|---|
 | 1 | card 25 — technological innovation | `assets/**/*.csv` (costs) |
-| 2.1 | EP2MACRO import | `system/` (demand) and `co2_source` on the nodes |
+| 2.1 | EP2MACRO import | `system/` (demand), `co2_source` on the nodes, and `co2_transmission.csv` (Industry_to_Sink) |
 | 2.2 | cards 2, 33 and 24 | `system/nodes_*.json` and `system/fuel_prices_*.csv` |
 | 3 | cards 27, 28, 29, 30, 31, 32 | `assets/**/*.csv` |
 | 4 | TDR | reduces everything under `system/` |
@@ -68,12 +68,13 @@ availability and prices all fall onto the same Period_map.
 | 30 | Solar and wind power | `data/card30_capacity.py` | only option B |
 | 31 | Rooftop solar deployment | `cards/card31.py` (rule) | complete |
 | 32 | Oil production | `data/card32_emissions.py` | complete |
-| 33 | Underground CO2 storage | `data/card33_storage.py` | C and Ceará pending |
+| 33 | Underground CO2 storage | `data/card33_storage.py` | complete (A, B, C) |
 
 All 10 Macro cards are implemented. What remains is missing data, not missing
 code: options A and C of card 25 and option A of card 30 are empty in the
-database; option C of card 33 and the Ceará basin are placeholders. Cards 28-C
-and 29-C create and activate `MaxCapacityConstraint`. Card 28-C writes
+database. Card 33-A prohibits injection by keeping `CO2StorageConstraint`
+active and setting its right-hand side to zero in every basin and period. Cards
+28-C and 29-C create and activate `MaxCapacityConstraint`. Card 28-C writes
 `max_capacity = 5000` on every gas plant kept, whether new or existing. The
 numeric limit for card 29 still needs to be supplied.
 

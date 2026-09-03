@@ -48,8 +48,7 @@ def main(argv=None):
                         help="write the adjustment report (default: <case>/adjustments.json)")
     parser.add_argument("--ep2macro", metavar="DIR",
                         help="EP2MACRO output folder: copies the demand files into system/ "
-                             "and writes CO2_Emissions into co2_source and into "
-                             "Industry_to_Sink existing_capacity of co2_transmission.csv")
+                             "and writes CO2_Emissions into co2_source")
     parser.add_argument("--tdr", action="store_true",
                         help="run run_tdr.jl at the end (needs julia on PATH)")
     parser.add_argument("-q", "--quiet", action="store_true")

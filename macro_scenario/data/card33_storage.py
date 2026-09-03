@@ -3,9 +3,10 @@
 Source: 24_30_33.xlsx, sheet "33. Underground CO2 storage". The numbers are the
 maximum annual injection rate and go into every nodes_<period>.json as they are.
 
-Option A does not write a number: it switches CO2StorageConstraint off.
-A None is a placeholder to be filled in later - the basin keeps the value the
-case already has and the run reports it.
+Option A prohibits injection by keeping CO2StorageConstraint active and writing
+an annual allowance of zero for every basin. A None is a placeholder to be
+filled in later - the basin keeps the value the case already has and the run
+reports it.
 """
 
 CONSTRAINT = "CO2StorageConstraint"
@@ -26,7 +27,8 @@ BASINS = [
 
 # None = placeholder, still to be defined
 STORAGE = {
-    "A": None,  # storage not allowed: the constraint is turned off
+    # Storage not allowed: the upper-bound constraint stays active at zero.
+    "A": {basin: 0 for basin in BASINS},
     "B": {
         "co2_storage_Parana": 332000000,
         "co2_storage_Santos": 38000000,

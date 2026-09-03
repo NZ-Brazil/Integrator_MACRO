@@ -8,15 +8,24 @@ Two things come from the converter, and neither is a form variable:
   CO2_Emissions.csv             ->  system/nodes_<period>.json
       Year,CO2_Total                   CO2 -> co2_source -> max_supply
                                  ->  assets/assets_<period>/co2_transmission.csv
-                                     CO2 -> Industry_to_Sink ->
-                                     edges--transmission_edge--existing_capacity
+                                     edges--transmission_edge (Industry_to_Sink)
 
-The industry emissions total is written twice, once per period: into
-co2_source.max_supply of system/nodes_<period>.json, as before, and now also
-into the existing_capacity of the Industry_to_Sink row of
-assets/assets_<period>/co2_transmission.csv - the transmission edge that
-carries the same CO2 out of co2_source. Both writes come from the same
-CO2_Emissions.csv reading, so the two stay in sync.
+The emissions total is written into co2_source.max_supply of each
+system/nodes_<period>.json, and into the Industry_to_Sink row of every
+assets/assets_<period>/co2_transmission.csv.
+
+Industry_to_Sink's existing_capacity is carried between periods by Macro, so it
+cannot be used as a period-specific emissions input directly: it is always set
+to 0. Instead, four columns are added if not already present -
+min_capacity, max_capacity, constraints--MinCapacityConstraint and
+constraints--MaxCapacityConstraint - and the emissions total for that period
+pins the edge into a [-1, +1] band around itself:
+
+    existing_capacity                        = 0
+    min_capacity                             = emissions - 1
+    max_capacity                             = emissions + 1
+    constraints--MinCapacityConstraint       = TRUE
+    constraints--MaxCapacityConstraint       = TRUE
 
 The demand files arrive with 8760 rows. That is on purpose: the TDR runs at the
 end of the pipeline and reduces everything in system/ together, so all series
@@ -42,11 +51,21 @@ SUPPLY_KEY = "max_supply"
 YEAR_COLUMNS = ("Year", "year", "Time_Index", "Period")
 TOTAL_COLUMNS = ("CO2_Total", "CO2_total", "Total")
 
+# -- Industry_to_Sink / co2_transmission.csv ------------------------------
+
 ASSETS_DIR = "assets"
 TRANSMISSION_FILENAME = "co2_transmission.csv"
-TRANSMISSION_ID = "Industry_to_Sink"
-CAPACITY_COLUMN = "edges--transmission_edge--existing_capacity"
-PERIOD_IN_ASSET_DIR = re.compile(r"_(\d{4})$")
+TRANSMISSION_ASSET_ID = "Industry_to_Sink"
+PERIOD_IN_DIRNAME = re.compile(r"(\d{4})$")
+
+EXISTING_CAPACITY = "edges--transmission_edge--existing_capacity"
+MIN_CAPACITY = "edges--transmission_edge--min_capacity"
+MAX_CAPACITY = "edges--transmission_edge--max_capacity"
+MIN_CAPACITY_CONSTRAINT = "edges--transmission_edge--constraints--MinCapacityConstraint"
+MAX_CAPACITY_CONSTRAINT = "edges--transmission_edge--constraints--MaxCapacityConstraint"
+NEW_COLUMNS = (MIN_CAPACITY, MAX_CAPACITY, MAX_CAPACITY_CONSTRAINT, MIN_CAPACITY_CONSTRAINT)
+TRUE = "TRUE"
+CAPACITY_BAND = 1
 
 
 def copy_demand_files(case_dir, source_dir, dry_run=False):
@@ -113,28 +132,35 @@ def write_emissions(case_dir, emissions, dry_run=False, warn=None):
     return changes
 
 
-def transmission_paths(case_dir):
-    """[(2025, Path), ...] for every assets_<period>/co2_transmission.csv in the case."""
+def _asset_period_dirs(case_dir):
+    """[(2025, Path), (2030, Path), ...] for assets/assets_<period>/."""
     root = Path(case_dir) / ASSETS_DIR
     if not root.is_dir():
         raise DataError(f"{ASSETS_DIR}/ not found in the case")
-
     found = []
-    for folder in sorted(p for p in root.iterdir() if p.is_dir()):
-        match = PERIOD_IN_ASSET_DIR.search(folder.name)
-        if not match:
-            continue
-        path = folder / TRANSMISSION_FILENAME
-        if path.is_file():
+    for path in sorted(p for p in root.iterdir() if p.is_dir()):
+        match = PERIOD_IN_DIRNAME.search(path.name)
+        if match:
             found.append((int(match.group(1)), path))
     return found
 
 
 def write_transmission_capacity(case_dir, emissions, dry_run=False, warn=None):
-    """Write CO2_Total into the existing_capacity of the Industry_to_Sink row of
-    every period's assets/assets_<period>/co2_transmission.csv."""
+    """Pin the Industry_to_Sink row of every co2_transmission.csv to the CO2_Total
+    of its period, as a [-1, +1] band around it rather than a fixed value.
+
+    existing_capacity is carried between periods by Macro, so it always becomes
+    0; min_capacity/max_capacity and their constraint flags are added to the
+    file when missing and then written for every period.
+    """
     changes = []
-    for period, path in transmission_paths(case_dir):
+    for period, folder in _asset_period_dirs(case_dir):
+        path = folder / TRANSMISSION_FILENAME
+        if not path.is_file():
+            if warn:
+                warn(f"{path.relative_to(case_dir)} not found")
+            continue
+
         value = emissions.get(period)
         if value is None:
             if warn:
@@ -142,21 +168,39 @@ def write_transmission_capacity(case_dir, emissions, dry_run=False, warn=None):
             continue
 
         table = read_table(path, key=ID_COLUMN)
-        row = table.index.get(TRANSMISSION_ID)
+        row = table.index.get(TRANSMISSION_ASSET_ID)
         if row is None:
             if warn:
-                warn(f"{path.name}: no row '{TRANSMISSION_ID}' in {TRANSMISSION_FILENAME}")
-            continue
-        if CAPACITY_COLUMN not in table.fieldnames:
-            if warn:
-                warn(f"{path.name}: no column '{CAPACITY_COLUMN}'")
+                warn(f"{path.relative_to(case_dir)}: no '{TRANSMISSION_ASSET_ID}' row")
             continue
 
-        before = row[CAPACITY_COLUMN]
-        after = str(value)
-        if before != after:
-            row[CAPACITY_COLUMN] = after
+        added = False
+        for column in NEW_COLUMNS:
+            if column not in table.fieldnames:
+                table.fieldnames.append(column)
+                for other in table.rows:
+                    other[column] = other.get(column, "")
+                added = True
+
+        cells = 0
+        for column, new_value in (
+            (EXISTING_CAPACITY, 0),
+            (MIN_CAPACITY, value - CAPACITY_BAND),
+            (MAX_CAPACITY, value + CAPACITY_BAND),
+            (MIN_CAPACITY_CONSTRAINT, TRUE),
+            (MAX_CAPACITY_CONSTRAINT, TRUE),
+        ):
+            if column not in table.fieldnames:
+                if warn:
+                    warn(f"{path.relative_to(case_dir)}: no '{column}' column")
+                continue
+            new_value = str(new_value)
+            if row[column] != new_value:
+                row[column] = new_value
+                cells += 1
+
+        if cells or added:
             if not dry_run:
                 write_table(table)
-            changes.append({"file": path.name, "period": period, "from": before, "to": after})
+            changes.append({"file": str(path.relative_to(case_dir)), "period": period, "cells": cells})
     return changes

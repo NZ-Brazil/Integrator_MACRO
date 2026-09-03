@@ -1,6 +1,6 @@
 """Variable 33 - Underground CO2 storage.
 
-    a  storage not allowed          -> CO2StorageConstraint turned off
+    a  storage not allowed          -> active constraint with zero allowance
     b  storage allowed              -> the annual injection allowance per basin
     c  higher annual potential      -> same shape, values still to be defined
 
@@ -10,9 +10,10 @@ Target, in every period file:
         CO2Captured -> co2_storage_<basin> -> constraints  -> CO2StorageConstraint
                                            -> rhs_policy   -> CO2StorageConstraint
 
-Option a switches the constraint off rather than writing a zero, which is what
-"not allowed" means in Macro. Switching back to b turns it on again, so moving
-between options is symmetric.
+Option a keeps the upper-bound constraint active and writes zero. Turning the
+constraint off would remove the upper bound and allow injection instead of
+prohibiting it. Moving between options is symmetric because every option writes
+both the activation flag and its allowance.
 
 A basin whose value is still None (the placeholders in data/card33_storage.py)
 keeps whatever the case has and is reported as a warning.
@@ -44,21 +45,17 @@ def apply(ctx):
 
     for period, nodes in open_nodes(ctx):
         edited = []
-        basins = [b for b in (allowances or {})] or _basins_in_file(nodes)
+        basins = list(allowances)
 
         for basin in basins:
-            value = None if allowances is None else allowances.get(basin)
-            if allowances is not None and value is None:
+            value = allowances.get(basin)
+            if value is None:
                 if basin not in pending:
                     pending.append(basin)
                 continue
             try:
-                if allowances is None:
-                    before, after = nodes.set(basin, CONSTRAINT, False,
-                                              section=SECTION_CONSTRAINTS)
-                else:
-                    nodes.set(basin, CONSTRAINT, True, section=SECTION_CONSTRAINTS)
-                    before, after = nodes.set(basin, CONSTRAINT, value, section=SECTION_RHS)
+                nodes.set(basin, CONSTRAINT, True, section=SECTION_CONSTRAINTS)
+                before, after = nodes.set(basin, CONSTRAINT, value, section=SECTION_RHS)
             except DataError as error:
                 if ctx.strict:
                     raise
@@ -81,7 +78,7 @@ def apply(ctx):
             f"those basins kept the value the case had"
         )
 
-    if allowances is not None and not any(v is not None for v in allowances.values()):
+    if not any(v is not None for v in allowances.values()):
         raise CardError(
             f"option {option} has no value defined yet; the case kept its allowances",
             status=R.NOT_IN_DATABASE,
@@ -91,12 +88,5 @@ def apply(ctx):
         ctx.unchanged(TARGET, detail=f"storage already set for option {option}")
         return
 
-    how = "constraint turned off" if allowances is None else "allowance per basin"
+    how = "zero allowance" if option == "A" else "allowance per basin"
     ctx.applied(TARGET, detail=f"{len(changes)} period file(s), {how}", changes=changes)
-
-
-def _basins_in_file(nodes):
-    """Used by option a, which has no value table of its own."""
-    from ..data.card33_storage import BASINS
-
-    return [b for b in BASINS if f'"id": "{b}"' in nodes.text]

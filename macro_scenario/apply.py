@@ -15,8 +15,6 @@ Order of operations:
     1  card 25                     costs in assets/
     2  EP2MACRO import             demand files into system/, CO2_Emissions
                                    into co2_source of every nodes_<period>.json
-                                   and into Industry_to_Sink existing_capacity
-                                   of every assets_<period>/co2_transmission.csv
        system cards                caps (2), CO2 storage (33), fuel prices (24)
     3  asset cards                 solar and wind limits (30), and the rest
     4  TDR                         reduces every series in system/ together
@@ -196,6 +194,13 @@ def _import_ep2macro(case_dir, ep2macro_dir, report, dry_run, strict):
         return
     try:
         emissions = ep2macro.read_emissions(emissions_path)
+    except DataError as error:
+        if strict:
+            raise
+        report.warn(f"[ep2macro] {error}")
+        return
+
+    try:
         changes = ep2macro.write_emissions(
             case_dir, emissions, dry_run=dry_run,
             warn=lambda message: report.warn(f"[ep2macro] {message}"),
@@ -210,25 +215,22 @@ def _import_ep2macro(case_dir, ep2macro_dir, report, dry_run, strict):
         if strict:
             raise
         report.warn(f"[ep2macro] {error}")
-        return
 
     try:
-        transmission_changes = ep2macro.write_transmission_capacity(
+        changes = ep2macro.write_transmission_capacity(
             case_dir, emissions, dry_run=dry_run,
             warn=lambda message: report.warn(f"[ep2macro] {message}"),
         )
         report.step(
             "ep2macro_co2_transmission",
-            f"{ep2macro.TRANSMISSION_ID} {ep2macro.CAPACITY_COLUMN} set in "
-            f"{len(transmission_changes)} {ep2macro.TRANSMISSION_FILENAME} file(s) from "
+            f"Industry_to_Sink capacity band set in {len(changes)} period file(s) from "
             f"{ep2macro.EMISSIONS_FILENAME}",
-            changes=transmission_changes,
+            changes=changes,
         )
     except DataError as error:
         if strict:
             raise
         report.warn(f"[ep2macro] {error}")
-
 
 def _run_tdr(case_dir, report, dry_run, strict):
     if dry_run:
