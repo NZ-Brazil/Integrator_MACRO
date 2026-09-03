@@ -7,6 +7,7 @@ touched where it should be, blanks in the data never erase a value, running
 twice changes nothing, and a bad answer warns instead of stopping the job.
 """
 
+import csv
 import json
 import shutil
 import tempfile
@@ -36,6 +37,19 @@ FUEL_PRICES = (
 )
 CAP_TRAJECTORY = "Year,MACRO_cap_MtCO2e,MAgPIE_cap_MtCO2e\n2025,614,981\n2030,471,805\n"
 CO2_EMISSIONS = "Year,CO2_Total\n2025,634911066.2785072\n2030,668507229.426174\n"
+CO2_TRANSMISSION = (
+    "Type,id,edges--transmission_edge--commodity,edges--transmission_edge--has_capacity,"
+    "edges--transmission_edge--can_expand,edges--transmission_edge--can_retire,"
+    "edges--transmission_edge--integer_decisions,"
+    "edges--transmission_edge--constraints--CapacityConstraint,"
+    "edges--transmission_edge--constraints--MustRunConstraint,"
+    "edges--transmission_edge--start_vertex,edges--transmission_edge--end_vertex,"
+    "edges--transmission_edge--distance,edges--transmission_edge--existing_capacity,"
+    "edges--transmission_edge--investment_cost,edges--transmission_edge--fixed_om_cost,"
+    "edges--transmission_edge--variable_om_cost,edges--transmission_edge--loss_fraction\n"
+    "OneWayTransmissionLink,Industry_to_Sink,CO2,TRUE,TRUE,FALSE,FALSE,TRUE,TRUE,co2_source,"
+    "co2_emitted_BR,0,32000,0,0,0,0\n"
+)
 
 WIND_IDS = list(CAPACITY["B"]["wind_onshore"])[:2]
 WIND_ASSETS = (
@@ -186,6 +200,7 @@ def build_case(root):
         (root / f"assets/assets_{period}/nuclear_power.csv").write_text(NUCLEAR, newline="")
         (root / f"assets/assets_{period}/rooftop_pv.csv").write_text(ROOFTOP, newline="")
         (root / f"assets/assets_{period}/fossil_fuels_upstream.csv").write_text(UPSTREAM, newline="")
+        (root / f"assets/assets_{period}/co2_transmission.csv").write_text(CO2_TRANSMISSION, newline="")
         (root / f"system/fuel_prices_{period}.csv").write_text(FUEL_PRICES, newline="")
         (root / f"system/nodes_{period}.json").write_text(NODES)
     (root / "Emissions_cap_trajectory.csv").write_text(CAP_TRAJECTORY, newline="")
@@ -221,6 +236,15 @@ def instance(case, node_id, period="2025"):
             if item["id"] == node_id:
                 return item
     raise KeyError(node_id)
+
+
+def transmission_row(case, asset_id="Industry_to_Sink", period="2025"):
+    path = Path(case) / f"assets/assets_{period}/co2_transmission.csv"
+    with open(path, newline="") as f:
+        for row in csv.DictReader(f):
+            if row["id"] == asset_id:
+                return row
+    raise KeyError(asset_id)
 
 
 class CaseTest(unittest.TestCase):
@@ -407,11 +431,13 @@ class Card2Test(CaseTest):
 
 
 class Card33Test(CaseTest):
-    def test_option_a_turns_the_constraint_off(self):
+    def test_option_a_sets_zero_allowance_in_every_period(self):
         run(self.case, [answer(33, "a")])
-        parana = instance(self.case, "co2_storage_Parana")
-        self.assertFalse(parana["constraints"]["CO2StorageConstraint"])
-        self.assertEqual(parana["rhs_policy"]["CO2StorageConstraint"], 332000000)
+        for period in PERIODS:
+            for basin in ("co2_storage_Parana", "co2_storage_Ceara"):
+                storage = instance(self.case, basin, period)
+                self.assertTrue(storage["constraints"]["CO2StorageConstraint"])
+                self.assertEqual(storage["rhs_policy"]["CO2StorageConstraint"], 0)
 
     def test_option_b_writes_the_allowance_in_every_period(self):
         run(self.case, [answer(33, "b")])
@@ -421,17 +447,19 @@ class Card33Test(CaseTest):
             self.assertEqual(parana["rhs_policy"]["CO2StorageConstraint"],
                              STORAGE["B"]["co2_storage_Parana"])
 
-    def test_placeholder_basin_is_kept_and_reported(self):
+    def test_option_b_writes_ceara_too(self):
         report = run(self.case, [answer(33, "b")])
         self.assertEqual(instance(self.case, "co2_storage_Ceara")["rhs_policy"]["CO2StorageConstraint"],
-                         300000)
-        self.assertTrue(any("Ceara" in w for w in report["warnings"]))
+                         STORAGE["B"]["co2_storage_Ceara"])
+        self.assertFalse(any("Ceara" in w for w in report["warnings"]))
 
-    def test_option_c_is_still_pending(self):
-        report = run(self.case, [answer(33, "c")])
-        self.assertEqual(report["adjustments"][0]["status"], "not_in_database")
-        self.assertEqual(instance(self.case, "co2_storage_Parana")["rhs_policy"]["CO2StorageConstraint"],
-                         332000000)
+    def test_option_c_writes_the_allowance_in_every_period(self):
+        run(self.case, [answer(33, "c")])
+        for period in PERIODS:
+            parana = instance(self.case, "co2_storage_Parana", period)
+            self.assertTrue(parana["constraints"]["CO2StorageConstraint"])
+            self.assertEqual(parana["rhs_policy"]["CO2StorageConstraint"],
+                             STORAGE["C"]["co2_storage_Parana"])
 
     def test_a_then_b_is_symmetric(self):
         run(self.case, [answer(33, "a")])
@@ -440,6 +468,15 @@ class Card33Test(CaseTest):
         self.assertTrue(parana["constraints"]["CO2StorageConstraint"])
         self.assertEqual(parana["rhs_policy"]["CO2StorageConstraint"],
                          STORAGE["B"]["co2_storage_Parana"])
+
+    def test_b_then_a_restores_zero_in_every_period(self):
+        run(self.case, [answer(33, "b")])
+        run(self.case, [answer(33, "a")])
+        for period in PERIODS:
+            for basin in ("co2_storage_Parana", "co2_storage_Ceara"):
+                storage = instance(self.case, basin, period)
+                self.assertTrue(storage["constraints"]["CO2StorageConstraint"])
+                self.assertEqual(storage["rhs_policy"]["CO2StorageConstraint"], 0)
 
 
 # -- card 30 -------------------------------------------------------------
@@ -647,9 +684,44 @@ class Ep2MacroTest(CaseTest):
         self.assertAlmostEqual(instance(self.case, "co2_source")["max_supply"][0],
                                634911066.2785072)
 
+    def test_co2_emissions_go_into_transmission_capacity_band(self):
+        run(self.case, [], ep2macro_dir=self.source)
+        row_2025 = transmission_row(self.case, period="2025")
+        self.assertEqual(row_2025["edges--transmission_edge--existing_capacity"], "0")
+        self.assertAlmostEqual(
+            float(row_2025["edges--transmission_edge--min_capacity"]), 634911066.2785072 - 1)
+        self.assertAlmostEqual(
+            float(row_2025["edges--transmission_edge--max_capacity"]), 634911066.2785072 + 1)
+        self.assertEqual(
+            row_2025["edges--transmission_edge--constraints--MinCapacityConstraint"], "TRUE")
+        self.assertEqual(
+            row_2025["edges--transmission_edge--constraints--MaxCapacityConstraint"], "TRUE")
+
+        row_2030 = transmission_row(self.case, period="2030")
+        self.assertAlmostEqual(
+            float(row_2030["edges--transmission_edge--min_capacity"]), 668507229.426174 - 1)
+        self.assertAlmostEqual(
+            float(row_2030["edges--transmission_edge--max_capacity"]), 668507229.426174 + 1)
+
+    def test_transmission_capacity_report_step(self):
+        report = run(self.case, [], ep2macro_dir=self.source)
+        self.assertTrue(any(s["step"] == "ep2macro_co2_transmission" for s in report["steps"]))
+
+    def test_running_twice_is_stable(self):
+        run(self.case, [], ep2macro_dir=self.source)
+        row_first = dict(transmission_row(self.case))
+        run(self.case, [], ep2macro_dir=self.source)
+        row_second = transmission_row(self.case)
+        self.assertEqual(row_first, row_second)
+
     def test_check_copies_nothing(self):
         run(self.case, [], ep2macro_dir=self.source, dry_run=True)
         self.assertFalse((self.case / "system/demand_2025.csv").exists())
+
+    def test_check_writes_nothing_to_transmission(self):
+        run(self.case, [], ep2macro_dir=self.source, dry_run=True)
+        raw = self.read("assets/assets_2025/co2_transmission.csv")
+        self.assertNotIn("min_capacity", raw)
 
 
 # -- the run as a whole --------------------------------------------------
