@@ -8,7 +8,8 @@ The stages follow the agreed order of operations:
 
     1  assets_cost   card 25, which rewrites the cost columns of every asset
     2  (EP2MACRO import: demand files into system/ and CO2_Emissions into the nodes)
-    2  system        cards that edit system/: the nodes (2, 33) and fuel prices (24)
+    2  system        cards that edit system/: the nodes (2, 33), fuel prices
+                     (24) and the fossil supply ceiling (23)
     3  assets        the remaining asset cards (27, 28, 29, 30, 31, 32)
     4  (TDR: reduces every series in system/ onto one period map)
 
@@ -28,11 +29,12 @@ To add a card:
   3. add it to ORDER if it must run before or after a sibling in the same stage
 """
 
-from . import (card2, card24, card25, card27, card28, card29, card30,
-               card31, card32, card33)
+from . import (card2, card23, card24, card25, card27, card28, card29,
+               card30, card31, card32, card33)
 
 HANDLERS = {
     2: card2.apply,
+    23: card23.apply,
     27: card27.apply,
     28: card28.apply,
     29: card29.apply,
@@ -54,6 +56,7 @@ STAGE_OF = {
     2: SYSTEM,
     33: SYSTEM,
     24: SYSTEM,
+    23: SYSTEM,
     27: ASSETS,
     28: ASSETS,
     29: ASSETS,
@@ -62,7 +65,7 @@ STAGE_OF = {
     32: ASSETS,
 }
 
-ORDER = [25, 2, 33, 24, 27, 28, 29, 30, 31, 32]
+ORDER = [25, 2, 33, 24, 23, 27, 28, 29, 30, 31, 32]
 
 # Card 2 is a slider in the form, but Macro ignores the slider and reads the cap
 # trajectory csv instead, so it runs even with no option letter marked.
