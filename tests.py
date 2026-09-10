@@ -18,6 +18,7 @@ from macro_scenario import apply_scenario_config
 from macro_scenario.data.card24_prices import PRICES
 from macro_scenario.data.card30_capacity import CAPACITY, COLUMN
 from macro_scenario.data.card33_storage import STORAGE
+from macro_scenario.data.card23_supply import SHARE, UNRESTRICTED
 from macro_scenario.scenario_config import Answer, parse_numeric, read_scenario_config
 
 ASSETS_FULL = (
@@ -126,6 +127,12 @@ UPSTREAM = (
     "Up,JetFuel_fossil_Upstream,0.01943\n"
 )
 
+TIME_DATA = """{
+    "HoursPerTimeStep": {"LiquidFuels": 1},
+    "TotalHoursModeled": 8760
+}
+"""
+
 NODES = """{
     "nodes": [
         {
@@ -148,6 +155,65 @@ NODES = """{
                     "price_supply": [
                         0
                     ]
+                }
+            ]
+        },
+        {
+            "type": "LiquidFuels",
+            "instance_data": [
+                {
+                    "id": "gasoline_fossil_BR",
+                    "max_supply": [
+                        100000000
+                    ],
+                    "price_supply": [
+                        32.3723698828436
+                    ]
+                },
+                {
+                    "id": "diesel_fossil_BR",
+                    "max_supply": [
+                        100000000
+                    ],
+                    "price_supply": [
+                        44.9159983630818
+                    ]
+                },
+                {
+                    "id": "jetfuel_fossil_BR",
+                    "max_supply": [
+                        100000000
+                    ],
+                    "price_supply": [
+                        68.1368077686693
+                    ]
+                },
+                {
+                    "id": "gasoline_demand_BR",
+                    "CMOUT_constraints": {
+                        "AggregatedDemandConstraint": true
+                    },
+                    "CMOUT_rhs_policy": {
+                        "AggregatedDemandConstraint": 76877727
+                    }
+                },
+                {
+                    "id": "flexfuel_demand_BR",
+                    "CMOUT_constraints": {
+                        "AggregatedDemandConstraint": true
+                    },
+                    "CMOUT_rhs_policy": {
+                        "AggregatedDemandConstraint": 546265094
+                    }
+                },
+                {
+                    "id": "diesel_demand_BR",
+                    "CMOUT_constraints": {
+                        "AggregatedDemandConstraint": true
+                    },
+                    "CMOUT_rhs_policy": {
+                        "AggregatedDemandConstraint": 706889525
+                    }
                 }
             ]
         },
@@ -203,6 +269,7 @@ def build_case(root):
         (root / f"assets/assets_{period}/co2_transmission.csv").write_text(CO2_TRANSMISSION, newline="")
         (root / f"system/fuel_prices_{period}.csv").write_text(FUEL_PRICES, newline="")
         (root / f"system/nodes_{period}.json").write_text(NODES)
+    (root / "system/time_data.json").write_text(TIME_DATA)
     (root / "Emissions_cap_trajectory.csv").write_text(CAP_TRAJECTORY, newline="")
     return root
 
@@ -477,6 +544,71 @@ class Card33Test(CaseTest):
                 storage = instance(self.case, basin, period)
                 self.assertTrue(storage["constraints"]["CO2StorageConstraint"])
                 self.assertEqual(storage["rhs_policy"]["CO2StorageConstraint"], 0)
+
+
+# -- card 23 -------------------------------------------------------------
+
+
+HOURS_PER_YEAR = 8760
+GASOLINE_DEMAND = 76877727 + 546265094
+DIESEL_DEMAND = 706889525
+
+
+class Card23Test(CaseTest):
+    def ceiling(self, node_id, period="2025"):
+        return instance(self.case, node_id, period)["max_supply"][0]
+
+    def test_option_a_leaves_the_case_unrestricted(self):
+        run(self.case, [answer(23, "a")])
+        for period in PERIODS:
+            for node_id in ("gasoline_fossil_BR", "diesel_fossil_BR"):
+                self.assertEqual(self.ceiling(node_id, period), UNRESTRICTED)
+
+    def test_option_b_is_the_period_share_of_the_demand_per_time_step(self):
+        run(self.case, [answer(23, "b")])
+        for period in PERIODS:
+            share = SHARE["B"][int(period)]
+            self.assertAlmostEqual(self.ceiling("gasoline_fossil_BR", period),
+                                   share * GASOLINE_DEMAND / HOURS_PER_YEAR, places=6)
+            self.assertAlmostEqual(self.ceiling("diesel_fossil_BR", period),
+                                   share * DIESEL_DEMAND / HOURS_PER_YEAR, places=6)
+
+    def test_the_trajectory_ends_at_zero_in_2050(self):
+        # the fixture only carries 2025 and 2030, so the end of the ramp is
+        # checked in the data instead of the case
+        self.assertEqual(SHARE["B"][2050], 0.0)
+
+    def test_jet_fuel_is_never_touched(self):
+        run(self.case, [answer(23, "b")])
+        for period in PERIODS:
+            self.assertEqual(self.ceiling("jetfuel_fossil_BR", period), UNRESTRICTED)
+
+    def test_b_then_a_restores_the_unrestricted_value(self):
+        run(self.case, [answer(23, "b")])
+        run(self.case, [answer(23, "a")])
+        for period in PERIODS:
+            for node_id in ("gasoline_fossil_BR", "diesel_fossil_BR"):
+                self.assertEqual(self.ceiling(node_id, period), UNRESTRICTED)
+
+    def test_running_b_twice_changes_nothing_the_second_time(self):
+        run(self.case, [answer(23, "b")])
+        report = run(self.case, [answer(23, "b")])
+        self.assertEqual(report["summary"]["unchanged"], 1)
+
+    def test_option_b_reports_what_the_substitute_has_to_deliver(self):
+        report = run(self.case, [answer(23, "b")])
+        notes = " ".join(report["notes"])
+        self.assertIn("renewable_diesel_BR", notes)
+        self.assertIn("has to come from", notes)
+
+    def test_the_first_period_needs_no_substitute(self):
+        report = run(self.case, [answer(23, "b")])
+        self.assertFalse(any("period 2025" in n for n in report["notes"]))
+
+    def test_an_unknown_option_is_reported_not_written(self):
+        report = run(self.case, [answer(23, "z")])
+        self.assertEqual(report["adjustments"][0]["status"], "not_in_database")
+        self.assertEqual(self.ceiling("diesel_fossil_BR"), UNRESTRICTED)
 
 
 # -- card 30 -------------------------------------------------------------
