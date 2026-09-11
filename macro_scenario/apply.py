@@ -13,9 +13,11 @@
 Order of operations:
 
     1  card 25                     costs in assets/
-    2  EP2MACRO import             demand files into system/, CO2_Emissions
-                                   into co2_source of every nodes_<period>.json
-       system cards                caps (2), CO2 storage (33), fuel prices (24)
+    2  EP2MACRO import             demand files into system/, AggregatedDemandConstraint
+                                   on the liquid-fuel demand nodes, CO2_Emissions into
+                                   co2_source of every nodes_<period>.json
+       system cards                caps (2), CO2 storage (33), fuel prices (24),
+                                   fossil fuel supply ceiling (23)
     3  asset cards                 solar and wind limits (30), and the rest
     4  TDR                         reduces every series in system/ together
 
@@ -183,6 +185,21 @@ def _import_ep2macro(case_dir, ep2macro_dir, report, dry_run, strict):
         copied = ep2macro.copy_demand_files(case_dir, source, dry_run=dry_run)
         report.step("ep2macro_demand", f"{len(copied)} demand file(s) copied into system/",
                     files=copied)
+    except DataError as error:
+        if strict:
+            raise
+        report.warn(f"[ep2macro] {error}")
+
+    try:
+        changes = ep2macro.write_demand_constraints(
+            case_dir, dry_run=dry_run,
+            warn=lambda message: report.warn(f"[ep2macro] {message}"),
+        )
+        report.step(
+            "ep2macro_demand_constraints",
+            f"AggregatedDemandConstraint set in {len(changes)} period file(s) from demand_LF_*.csv",
+            changes=changes,
+        )
     except DataError as error:
         if strict:
             raise
