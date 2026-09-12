@@ -59,7 +59,7 @@ availability and prices all fall onto the same Period_map.
 
 | id | variable | source of values | status |
 |---|---|---|---|
-| 2 | Net emissions caps | `Emissions_cap_trajectory.csv` (MtCO2e × 1e6) | complete |
+| 2 | Net emissions caps | `Emissions_cap_trajectory.csv` or `emissions_cap_trajectories.csv` (MtCO2e × 1e6) | complete |
 | 24 | Fossil fuel wholesale prices | `data/card24_prices.py` | complete (A, B, C) |
 | 25 | Energy supply technology innovation | `_25-X` columns in `assets_full/` | database only has B |
 | 27 | Hydroelectric power plants | `cards/card27.py` (rule, no numbers) | complete |
